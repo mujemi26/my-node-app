@@ -9,9 +9,9 @@ pipeline {
         IMAGE_TAG = "${BUILD_NUMBER}"
         
         // EC2 configurations
-        EC2_HOST = 'ec2-user@ec2-52-73-65-200.compute-1.amazonaws.com'
-        EC2_USER = 'ec2-user'  // or 'ec2-user' depending on your AMI
-        EC2_SSH_KEY = credentials('ec2-ssh-key')  // SSH key stored in Jenkins
+        EC2_HOST = '52.73.65.200'  // Just the IP address without ec2-user@
+        EC2_USER = 'ec2-user'
+        EC2_SSH_KEY = credentials('ec2-ssh-key')  // Make sure this is the correct credentials ID        
         APP_PORT = '3000'  // The port your application runs on
     }
     
