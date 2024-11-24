@@ -2,14 +2,17 @@ pipeline {
     agent any
     
     environment {
-        // Define Docker Hub credentials ID (you need to add these in Jenkins credentials)
+        // Docker Hub configurations
         DOCKERHUB_CREDENTIALS = credentials('dockerhub-credentials')
-        // Replace with your Docker Hub username
         DOCKER_HUB_USERNAME = 'mujimmy'
-        // Replace with your desired image name
         IMAGE_NAME = 'my-node-app'
-        // You can use BUILD_NUMBER for versioning
         IMAGE_TAG = "${BUILD_NUMBER}"
+        
+        // EC2 configurations
+        EC2_HOST = 'ec2-user@ec2-52-73-65-200.compute-1.amazonaws.com'
+        EC2_USER = 'ec2-user'  // or 'ec2-user' depending on your AMI
+        EC2_SSH_KEY = credentials('ec2-ssh-key')  // SSH key stored in Jenkins
+        APP_PORT = '3000'  // The port your application runs on
     }
     
     stages {
@@ -30,9 +33,7 @@ pipeline {
         stage('Build Docker Image') {
             steps {
                 script {
-                    // Build the Docker image
                     sh "docker build -t ${DOCKER_HUB_USERNAME}/${IMAGE_NAME}:${IMAGE_TAG} ."
-                    // Also tag it as latest
                     sh "docker tag ${DOCKER_HUB_USERNAME}/${IMAGE_NAME}:${IMAGE_TAG} ${DOCKER_HUB_USERNAME}/${IMAGE_NAME}:latest"
                 }
             }
@@ -41,7 +42,6 @@ pipeline {
         stage('Login to Docker Hub') {
             steps {
                 script {
-                    // Login to Docker Hub
                     sh "echo ${DOCKERHUB_CREDENTIALS_PSW} | docker login -u ${DOCKERHUB_CREDENTIALS_USR} --password-stdin"
                 }
             }
@@ -50,9 +50,54 @@ pipeline {
         stage('Push to Docker Hub') {
             steps {
                 script {
-                    // Push both tagged version and latest
                     sh "docker push ${DOCKER_HUB_USERNAME}/${IMAGE_NAME}:${IMAGE_TAG}"
                     sh "docker push ${DOCKER_HUB_USERNAME}/${IMAGE_NAME}:latest"
+                }
+            }
+        }
+        
+        stage('Deploy to EC2') {
+            steps {
+                script {
+                    // Write the deployment script to a temporary file
+                    writeFile file: 'deploy.sh', text: """
+                        #!/bin/bash
+                        # Stop and remove existing container if it exists
+                        docker stop ${IMAGE_NAME} || true
+                        docker rm ${IMAGE_NAME} || true
+                        
+                        # Remove old images to free up space
+                        docker system prune -af
+                        
+                        # Login to Docker Hub
+                        echo ${DOCKERHUB_CREDENTIALS_PSW} | docker login -u ${DOCKERHUB_CREDENTIALS_USR} --password-stdin
+                        
+                        # Pull the latest image
+                        docker pull ${DOCKER_HUB_USERNAME}/${IMAGE_NAME}:${IMAGE_TAG}
+                        
+                        # Run the new container
+                        docker run -d \\
+                            --name ${IMAGE_NAME} \\
+                            -p ${APP_PORT}:${APP_PORT} \\
+                            --restart unless-stopped \\
+                            ${DOCKER_HUB_USERNAME}/${IMAGE_NAME}:${IMAGE_TAG}
+                            
+                        # Logout from Docker Hub
+                        docker logout
+                    """
+                    
+                    // Make the script executable and copy it to EC2
+                    sh "chmod +x deploy.sh"
+                    sh "scp -o StrictHostKeyChecking=no -i ${EC2_SSH_KEY} deploy.sh ${EC2_USER}@${EC2_HOST}:~/"
+                    
+                    // Execute the deployment script on EC2
+                    sh """
+                        ssh -o StrictHostKeyChecking=no -i ${EC2_SSH_KEY} ${EC2_USER}@${EC2_HOST} '~/deploy.sh'
+                    """
+                    
+                    // Clean up the deployment script
+                    sh "rm deploy.sh"
+                    sh "ssh -i ${EC2_SSH_KEY} ${EC2_USER}@${EC2_HOST} 'rm ~/deploy.sh'"
                 }
             }
         }
@@ -60,7 +105,6 @@ pipeline {
     
     post {
         always {
-            // Always clean up by logging out of Docker Hub
             sh 'docker logout'
         }
         success {
