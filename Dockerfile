@@ -4,11 +4,20 @@ FROM node:18-alpine
 # Step 2: Set the working directory inside the container
 WORKDIR /usr/src/app
 
-# Step 3: Copy the app.js file into the container's working directory
-COPY app.js .
+# Step 3: Copy package.json and package-lock.json first (for better caching)
+COPY package*.json ./
 
-# Step 4: Expose port 3000 to the outside world
+# Step 4: Install dependencies
+RUN npm install
+
+# Step 5: Copy all project files
+COPY . .
+
+# Step 6: Expose port 3000
 EXPOSE 3000
 
-# Step 5: Define the command to run the app
-CMD ["node", "app.js"]
+# Step 7: Install PM2 for process management
+RUN npm install pm2 -g
+
+# Step 8: Use PM2 to run and keep the application running
+CMD ["pm2-runtime", "app.js"]
